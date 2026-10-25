@@ -1,0 +1,12 @@
+# The executor image referenced by KFP 2.4.1 points at a retired mirror.
+spec:
+  template:
+    spec:
+      containers:
+        - name: workflow-controller
+          args:
+            - --configmap
+            - workflow-controller-configmap
+            - --executor-image
+            - quay.io/argoproj/argoexec:v3.4.17
+            - --namespaced

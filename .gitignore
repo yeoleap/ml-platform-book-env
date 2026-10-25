@@ -1,0 +1,16 @@
+.cache/
+.venv/
+__pycache__/
+*.pyc
+examples/selected_model_uri.txt
+examples/*.yaml
+!examples/feature_repo/*.yaml
+upstream/
+.venv-book/
+book/**/categorical_variable_plots/
+book/**/column_list.pkl
+book/**/mlruns/
+*.log
+book/**/feature_repo/
+*.executed.ipynb
+.ipynb_checkpoints/

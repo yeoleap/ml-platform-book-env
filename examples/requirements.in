@@ -1,0 +1,12 @@
+mlflow==3.0.0
+feast[redis]==0.40.1
+kfp==2.10.1
+kfp-kubernetes==1.4.0
+pandas==2.2.3
+pyarrow==17.0.0
+numpy==1.26.4
+scikit-learn==1.5.2
+s3fs[boto3]>=2024.6.0
+boto3
+sqlalchemy<2.1
+alembic<1.17

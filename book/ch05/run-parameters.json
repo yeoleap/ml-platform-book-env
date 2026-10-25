@@ -1,0 +1,16 @@
+{
+  "minio_host": "minio-service.kubeflow.svc.cluster.local:9000",
+  "access_key": "minio",
+  "secret_key": "minio123",
+  "entity_df_bucket": "feature-data-sets",
+  "entity_df_filename": "entity_df.parquet",
+  "feature_store_bucket_name": "feature-registry",
+  "feature_store_config_file_name": "feature_store_k8s.yaml",
+  "feature_list": "demographic:Sex,demographic:Race,demographic:Native_country,relationship:Relationship,relationship:Marital-Status,occupation:Workclass,occupation:Education,occupation:Occupation",
+  "model_name": "random-forest-classifier",
+  "model_type": "sklearn",
+  "model_stage": "Production",
+  "mlflow_host": "http://mlflow-service.mlflow.svc.cluster.local:5000",
+  "output_bucket": "inference-datasets",
+  "output_file_name": "income_predictions.parquet"
+}

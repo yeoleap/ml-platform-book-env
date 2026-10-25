@@ -1,0 +1,18 @@
+# Same as practical-mlops/chapter-5/Dockerfile except:
+# - python:3.10-slim-buster -> python:3.10-slim-bookworm (buster apt repos return 404)
+# - scikit-learn and SQLAlchemy pinned to match the chapter 4 notebook environment
+#   (the model is pickled with scikit-learn 1.5.2; MLflow 3.0.0 needs SQLAlchemy < 2.1)
+# Build context: upstream/chapter-5
+FROM python:3.10-slim-bookworm
+WORKDIR /app
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+    build-essential \
+    && apt-get clean && rm -rf /tmp/* /var/tmp/*
+
+COPY requirements.txt /app/requirements.txt
+RUN pip3 install --upgrade pip
+RUN pip3 install --no-cache-dir -r requirements.txt "scikit-learn==1.5.2" "sqlalchemy<2.1"
+
+ENV PYTHONPATH="/app"
+COPY . /app

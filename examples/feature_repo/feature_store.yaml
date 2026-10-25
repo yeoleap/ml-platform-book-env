@@ -1,0 +1,11 @@
+project: income_book_env
+provider: local
+entity_key_serialization_version: 2
+# The registry lives in S3, so the laptop and the KFP Pods read the same file.
+# The S3 address comes from FEAST_S3_ENDPOINT_URL in each environment.
+registry: s3://feature-registry/registry.db
+offline_store:
+  type: file
+online_store:
+  type: redis
+  connection_string: ${REDIS_CONNECTION_STRING}

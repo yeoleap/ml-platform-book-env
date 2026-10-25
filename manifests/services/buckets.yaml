@@ -1,0 +1,37 @@
+# Creates the buckets the book creates by hand in the MinIO console.
+# `feature_data_sets` from the book text is not a valid S3 bucket name, so the
+# hyphenated name from the official chapter-4 README is used.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-buckets
+  namespace: kubeflow
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws
+          image: amazon/aws-cli:2.22.35
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mlpipeline-minio-artifact
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mlpipeline-minio-artifact
+                  key: secretkey
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              for bucket in mlflow-datasets mlflow-artifacts feature-registry feature-data-sets inference-datasets; do
+                aws --endpoint-url http://minio-service:9000 s3api head-bucket --bucket "$bucket" 2>/dev/null \
+                  || aws --endpoint-url http://minio-service:9000 s3api create-bucket --bucket "$bucket"
+              done
+              aws --endpoint-url http://minio-service:9000 s3 ls

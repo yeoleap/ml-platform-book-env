@@ -1,0 +1,27 @@
+# practical-mlops/chapter-5/scripts/feast/k8s/job.yaml with two changes:
+# - the image is built locally and loaded into kind (no Docker Hub push)
+# - namespace is set explicitly
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: feast-job
+  namespace: kubeflow
+spec:
+  template:
+    spec:
+      containers:
+      - name: feast-container
+        image: book-ch5/feast-job:0.1
+        imagePullPolicy: Never
+        command: ["feast", "apply"]
+        env:
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "minio123"
+        - name: AWS_ACCESS_KEY_ID
+          value: "minio"
+        - name: FEAST_S3_ENDPOINT_URL
+          value: "http://minio-service.kubeflow.svc.cluster.local:9000"
+        - name: AWS_ENDPOINT_URL
+          value: "http://minio-service.kubeflow.svc.cluster.local:9000"
+      restartPolicy: Never
+  backoffLimit: 4
