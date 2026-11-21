@@ -2,6 +2,27 @@
 
 『Machine Learning Platform Engineering』 4장(MLflow, Feast)과 5장(Kubeflow Pipelines 배치 추론)을 PC 한 대에서 따라 하기 위한 저장소다. 책은 Kubeflow, MinIO, PostgreSQL, Redis, MLflow 서버가 이미 설치된 클러스터를 전제로 하고 실습 절차도 한두 문장으로 지나가기 때문에, 여기서는 그 환경을 명령 하나로 만들고 책의 실습을 번호 순서대로 풀어 적었다. 아래 출력과 화면은 클러스터를 지운 상태에서 이 순서대로 다시 실행해 얻은 것이다.
 
+> **`mac-arm64-labs` 브랜치에 대해**
+>
+> 이 브랜치는 [johklo/ml-platform-book-env](https://github.com/johklo/ml-platform-book-env)의 fork에 7, 8, 10장 실습 코드를 더한 개인 학습 기록이다. 스터디 멤버의 [실습 가이드](https://johklo.github.io/docs/tech/machine-learning-platform-engineering/practice/ch07/)를 Apple Silicon 맥(arm64)의 kind 클러스터에 맞게 바꿔 진행했다.
+>
+> | 폴더 | 내용 |
+> | --- | --- |
+> | `ch07/` | KFP 데이터 준비 파이프라인 (저자 원본 재현과 수정본) |
+> | `ch08/` | YOLOv8 학습과 검증 파이프라인, 결과 검토, MLflow 기록 |
+> | `ch10/` | MLflow 레지스트리 모델을 BentoML로 서빙, arm64 이미지, kind 매니페스트 |
+>
+> **출처와 라이선스**
+>
+> - **저자 코드:** 7, 8, 10장 코드의 상당 부분은 책 저자의 저장소를 고친 것이다.
+>   - [practical-mlops/object-detection-project](https://github.com/practical-mlops/object-detection-project)(커밋 `c6afb11`)에서 가져온 파일: `ch07/idcard_*`, `ch08/ch08_pipeline.py`, `ch10/detector/service.py`
+>   - [practical-mlops/movie-recommender-project](https://github.com/practical-mlops/movie-recommender-project)(MIT)에서 가져온 파일: `ch07/movielens_*`
+>   - 원본과 달라진 점은 주요 파일의 첫 주석(docstring)에 적어 두었다.
+> - **라이선스가 없는 원본:** object-detection-project 저장소에는 라이선스 파일이 없다. 그래서 이 저장소에서 갈라져 나온 파일의 권리는 원저작자에게 있고, 이 브랜치는 학습 기록으로만 공개한다. 원저작자가 요청하면 해당 파일을 내린다.
+> - **실습 가이드의 스크립트:** `ch08/`의 합성 데이터 생성(`make_synthetic_idcards.py`), 결과 검토(`review.py`, `stress_review.py`), 아티팩트 다운로드(`download_artifacts.py`)는 위 실습 가이드에 실린 스크립트를 바탕으로 했다.
+> - **포함하지 않은 것:** 데이터셋, 학습된 모델 가중치(`.pt`), 생성된 이미지, 로컬 저장소(`bentoml-home` 등). 데이터는 모두 스크립트로 만든 합성 이미지이고, 실제 사람이나 신분증 정보는 없다.
+> - **비밀번호:** 코드에 들어 있는 `minio`/`minio123`은 로컬 실습 클러스터의 기본값이다.
+
 ## 구성
 
 ```mermaid
