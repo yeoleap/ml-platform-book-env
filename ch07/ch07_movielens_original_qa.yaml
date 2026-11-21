@@ -1,0 +1,85 @@
+# PIPELINE DEFINITION
+# Name: ch07-movielens-original-qa
+# Inputs:
+#    dataset: str [Default: 'ml-latest-small']
+#    minio_bucket: str [Default: 'datasets']
+components:
+  comp-qa-data:
+    executorLabel: exec-qa-data
+    inputDefinitions:
+      parameters:
+        bucket:
+          defaultValue: datasets
+          isOptional: true
+          parameterType: STRING
+        dataset:
+          defaultValue: ml-25m
+          isOptional: true
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-qa-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - qa_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pyarrow' 'pandas'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef qa_data(bucket: str = 'datasets', dataset: str = 'ml-25m'):\n\
+          \    from pyarrow import fs, parquet\n    print(\"Running QA\")\n    minio\
+          \ = fs.S3FileSystem(\n        endpoint_override='http://minio-service.kubeflow:9000',\n\
+          \        access_key='minio',\n        secret_key='minio123',\n        scheme='http')\n\
+          \    train_parquet = minio.open_input_file(f'{bucket}/{dataset}/train.parquet.gzip')\n\
+          \    df = parquet.read_table(train_parquet).to_pandas()\n    assert df.shape[1]\
+          \ == 4\n    assert df.shape[0] >= 0.75 * 25 * 1e6\n    print('QA passed!')\n\
+          \n"
+        image: python:3.11
+pipelineInfo:
+  name: ch07-movielens-original-qa
+root:
+  dag:
+    tasks:
+      qa-data:
+        cachingOptions: {}
+        componentRef:
+          name: comp-qa-data
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: minio_bucket
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: qa-data
+  inputDefinitions:
+    parameters:
+      dataset:
+        defaultValue: ml-latest-small
+        isOptional: true
+        parameterType: STRING
+      minio_bucket:
+        defaultValue: datasets
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

@@ -1,0 +1,289 @@
+# PIPELINE DEFINITION
+# Name: ch07-idcard-prep-fixed
+# Inputs:
+#    random_state: int [Default: 42.0]
+components:
+  comp-check-split-pairs:
+    executorLabel: exec-check-split-pairs
+    inputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        fail_on_error:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+  comp-download-dataset-from-s3:
+    executorLabel: exec-download-dataset-from-s3
+    inputDefinitions:
+      parameters:
+        output_dir:
+          defaultValue: DATASET
+          isOptional: true
+          parameterType: STRING
+        source_bucket:
+          defaultValue: ch07-raw
+          isOptional: true
+          parameterType: STRING
+        source_key:
+          defaultValue: synthetic-idcards.tar.gz
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-split-dataset-by-stem:
+    executorLabel: exec-split-dataset-by-stem
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        base_path:
+          defaultValue: MINIDATA
+          isOptional: true
+          parameterType: STRING
+        random_state:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-check-split-pairs:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - check_split_pairs
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef check_split_pairs(\n    train_dataset: Input[Dataset],\n    validation_dataset:\
+          \ Input[Dataset],\n    test_dataset: Input[Dataset],\n    report: Output[Metrics],\n\
+          \    fail_on_error: bool = True,\n):\n    \"\"\"Checks every split: image/label\
+          \ pairing by stem, YOLO format, clip leakage.\"\"\"\n    import os\n\n \
+          \   def labels_in(path):\n        return {os.path.splitext(f)[0]: os.path.join(path,\
+          \ f) for f in os.listdir(path)}\n\n    errors, clips = [], {}\n    for name,\
+          \ ds in [(\"train\", train_dataset), (\"validation\", validation_dataset),\
+          \ (\"test\", test_dataset)]:\n        imgs = labels_in(os.path.join(ds.path,\
+          \ \"images\"))\n        lbls = labels_in(os.path.join(ds.path, \"labels\"\
+          ))\n        unmatched = sorted(set(imgs) ^ set(lbls))\n        bad = 0\n\
+          \        for stem, path in lbls.items():\n            for line in open(path).read().splitlines():\n\
+          \                parts = line.split()\n                if len(parts) !=\
+          \ 5 or parts[0] != \"0\" or not all(0 <= float(v) <= 1 for v in parts[1:]):\n\
+          \                    bad += 1\n        clips[name] = {s.split(\"_\")[0]\
+          \ for s in imgs}\n        print(f\"{name}: images={len(imgs)} labels={len(lbls)}\
+          \ unmatched={len(unmatched)} bad_label_lines={bad}\")\n        if unmatched:\n\
+          \            print(\"  e.g.\", unmatched[:4])\n        report.log_metric(f\"\
+          {name}_images\", len(imgs))\n        report.log_metric(f\"{name}_unmatched\"\
+          , len(unmatched))\n        if unmatched or bad:\n            errors.append(f\"\
+          {name}: {len(unmatched)} unmatched, {bad} bad lines\")\n    for a, b in\
+          \ [(\"train\", \"validation\"), (\"train\", \"test\"), (\"validation\",\
+          \ \"test\")]:\n        shared = sorted(clips[a] & clips[b])\n        print(f\"\
+          clips shared by {a} and {b}: {len(shared)} {shared[:6]}\")\n        report.log_metric(f\"\
+          shared_clips_{a}_{b}\", len(shared))\n        if shared:\n            errors.append(f\"\
+          {a}/{b} share clips {shared[:6]}\")\n    if errors and fail_on_error:\n\
+          \        raise SystemExit(\"QA failed: \" + \"; \".join(errors))\n    print(\"\
+          QA passed\" if not errors else \"QA found problems (not failing)\")\n\n"
+        image: python:3.11
+    exec-download-dataset-from-s3:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_dataset_from_s3
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'boto3' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_dataset_from_s3(\n    output_dataset: Output[Dataset],\n\
+          \    source_bucket: str = \"ch07-raw\",\n    source_key: str = \"synthetic-idcards.tar.gz\"\
+          ,\n    output_dir: str = \"DATASET\",\n):\n    \"\"\"Replaces the author's\
+          \ Box download, which now returns 404.\"\"\"\n    import os\n    import\
+          \ tarfile\n\n    import boto3\n\n    s3 = boto3.client(\"s3\", endpoint_url=\"\
+          http://minio-service.kubeflow:9000\",\n                      aws_access_key_id=\"\
+          minio\", aws_secret_access_key=\"minio123\")\n    s3.download_file(source_bucket,\
+          \ source_key, \"DATASET.gz\")\n    extraction_path = os.path.join(output_dataset.path,\
+          \ output_dir)\n    os.makedirs(extraction_path, exist_ok=True)\n    with\
+          \ tarfile.open(\"DATASET.gz\", \"r:gz\") as tar:\n        tar.extractall(extraction_path,\
+          \ filter=\"data\")\n    for root, _, files in os.walk(extraction_path):\n\
+          \        if files:\n            print(root, len(files), \"files\")\n\n"
+        image: python:3.11
+    exec-split-dataset-by-stem:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - split_dataset_by_stem
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef split_dataset_by_stem(\n    random_state: int,\n    input_dataset:\
+          \ Input[Dataset],\n    train_dataset: Output[Dataset],\n    validation_dataset:\
+          \ Output[Dataset],\n    test_dataset: Output[Dataset],\n    base_path: str\
+          \ = \"MINIDATA\",\n):\n    \"\"\"Pairs files by stem before splitting and\
+          \ keeps each clip in one split.\"\"\"\n    import os\n    import random\n\
+          \    import shutil\n\n    root = os.path.join(input_dataset.path, \"DATASET\"\
+          , base_path)\n    imgs = {os.path.splitext(f)[0]: f for f in os.listdir(os.path.join(root,\
+          \ \"images\"))}\n    lbls = {os.path.splitext(f)[0]: f for f in os.listdir(os.path.join(root,\
+          \ \"labels\"))}\n    missing = sorted(set(imgs) ^ set(lbls))\n    if missing:\n\
+          \        raise SystemExit(f\"image/label stems do not match: {missing[:10]}\"\
+          )\n\n    clips = sorted({s.split(\"_\")[0] for s in imgs})\n    random.Random(random_state).shuffle(clips)\n\
+          \    n_train = round(len(clips) * 0.75)\n    n_val = round(len(clips) *\
+          \ 0.15)\n    parts = [clips[:n_train], clips[n_train:n_train + n_val], clips[n_train\
+          \ + n_val:]]\n\n    for out, chosen in zip([train_dataset, validation_dataset,\
+          \ test_dataset], parts):\n        os.makedirs(os.path.join(out.path, \"\
+          images\"), exist_ok=True)\n        os.makedirs(os.path.join(out.path, \"\
+          labels\"), exist_ok=True)\n        stems = sorted(s for s in imgs if s.split(\"\
+          _\")[0] in chosen)\n        for s in stems:\n            shutil.copy2(os.path.join(root,\
+          \ \"images\", imgs[s]), os.path.join(out.path, \"images\", imgs[s]))\n \
+          \           shutil.copy2(os.path.join(root, \"labels\", lbls[s]), os.path.join(out.path,\
+          \ \"labels\", lbls[s]))\n        print(f\"{out.uri}: {len(stems)} pairs\
+          \ from clips {sorted(chosen)}\")\n\n"
+        image: python:3.11
+pipelineInfo:
+  name: ch07-idcard-prep-fixed
+root:
+  dag:
+    tasks:
+      check-split-pairs:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-check-split-pairs
+        dependentTasks:
+        - split-dataset-by-stem
+        inputs:
+          artifacts:
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: split-dataset-by-stem
+            train_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: train_dataset
+                producerTask: split-dataset-by-stem
+            validation_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: validation_dataset
+                producerTask: split-dataset-by-stem
+        taskInfo:
+          name: check-split-pairs
+      download-dataset-from-s3:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-dataset-from-s3
+        taskInfo:
+          name: download-dataset-from-s3
+      split-dataset-by-stem:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-split-dataset-by-stem
+        dependentTasks:
+        - download-dataset-from-s3
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: download-dataset-from-s3
+          parameters:
+            random_state:
+              componentInputParameter: random_state
+        taskInfo:
+          name: split-dataset-by-stem
+  inputDefinitions:
+    parameters:
+      random_state:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

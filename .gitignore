@@ -14,3 +14,19 @@ book/**/mlruns/
 book/**/feature_repo/
 *.executed.ipynb
 .ipynb_checkpoints/
+
+# ch07-10 lab outputs (generated data, models, images, local stores)
+.DS_Store
+data/
+ch*/.venv/
+ch*/yolo-config/
+ch*/Untitled*.ipynb
+*.tar
+*.tar.gz
+*.pt
+*.jpg
+ch08/synthetic/
+ch08/holdout/
+ch08/kfp_artifacts/
+ch10/bentoml-home/
+ch10/detector/model_info.json

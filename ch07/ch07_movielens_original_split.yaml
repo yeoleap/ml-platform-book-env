@@ -1,0 +1,304 @@
+# PIPELINE DEFINITION
+# Name: ch07-movielens-original-split
+# Inputs:
+#    dataset: str [Default: 'ml-latest-small']
+#    random_init: int [Default: 42.0]
+components:
+  comp-csv-to-parquet:
+    executorLabel: exec-csv-to-parquet
+    inputDefinitions:
+      artifacts:
+        inputFile:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-download-movielens:
+    executorLabel: exec-download-movielens
+    inputDefinitions:
+      parameters:
+        dataset:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_path_one:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-split-dataset:
+    executorLabel: exec-split-dataset
+    inputDefinitions:
+      artifacts:
+        input_parquet:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        dataset_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-unzip-movielens:
+    executorLabel: exec-unzip-movielens
+    inputDefinitions:
+      artifacts:
+        input_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        dataset:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        movies_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        ratings_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-csv-to-parquet:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - csv_to_parquet
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'fastparquet' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef csv_to_parquet(inputFile: Input[Artifact], output_path: Output[Artifact]):\n\
+          \    import pandas as pd\n    df = pd.read_csv(inputFile.path, index_col=False)\n\
+          \    df.to_parquet(output_path.path, compression='gzip') \n\n"
+        image: python:3.11
+    exec-download-movielens:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_movielens
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'requests' &&\
+          \ \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_movielens(output_path_one: Output[Artifact], dataset:\
+          \ str = \"ml-latest-small\"):\n    \"\"\"Author's download with the dataset\
+          \ name as a parameter and TLS verification on.\"\"\"\n    import hashlib\n\
+          \n    import requests\n\n    url = f\"https://files.grouplens.org/datasets/movielens/{dataset}.zip\"\
+          \n    response = requests.get(url, stream=True, timeout=60)\n    response.raise_for_status()\n\
+          \    digest = hashlib.sha256()\n    with open(output_path_one.path, \"wb\"\
+          ) as file:\n        for chunk in response.iter_content(chunk_size=1024 *\
+          \ 1024):\n            if chunk:\n                file.write(chunk)\n   \
+          \             digest.update(chunk)\n    output_path_one.metadata[\"source_url\"\
+          ] = url\n    output_path_one.metadata[\"sha256\"] = digest.hexdigest()\n\
+          \    print(url, digest.hexdigest())\n\n"
+        image: python:3.11
+    exec-split-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - split_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'fastparquet' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef split_dataset(input_parquet: Input[Artifact], dataset_path: Output[Artifact],\
+          \ random_state: int = 42):\n    from sklearn.model_selection import train_test_split\n\
+          \    import os\n    import pandas as pd\n    train_ratio = 0.75\n    validation_ratio\
+          \ = 0.15\n    test_ratio = 0.10\n    ratings_df = pd.read_parquet(input_parquet.path)\n\
+          \n    # train is now 75% of the entire data set\n    train, test = train_test_split(\n\
+          \        ratings_df,                                    \n        test_size=1\
+          \ - train_ratio,\n        random_state=random_state)\n\n    n_users = ratings_df.user_id.max()\n\
+          \    n_items = ratings_df.item_id.max()\n\n    # test is now 10% of the\
+          \ initial data set\n    # validation is now 15% of the initial data set\n\
+          \    val, test = train_test_split(\n        test,\n        test_size=test_ratio\
+          \ / (test_ratio + validation_ratio),\n        random_state=random_state)\n\
+          \    os.mkdir(dataset_path.path)\n    train.to_parquet(os.path.join(dataset_path.path,\
+          \ 'train.parquet.gzip'), compression='gzip')\n    test.to_parquet(os.path.join(dataset_path.path,\
+          \ 'test.parquet.gzip'), compression='gzip')\n    val.to_parquet(os.path.join(dataset_path.path,\
+          \ 'val.parquet.gzip'), compression='gzip')\n\n"
+        image: python:3.11
+    exec-unzip-movielens:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - unzip_movielens
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef unzip_movielens(input_path: Input[Artifact], ratings_output_path:\
+          \ Output[Artifact],\n                    movies_output_path: Output[Artifact],\
+          \ dataset: str = \"ml-latest-small\"):\n    import zipfile\n\n    with zipfile.ZipFile(input_path.path,\
+          \ \"r\") as z:\n        with open(ratings_output_path.path, \"wb\") as f:\n\
+          \            f.write(z.read(f\"{dataset}/ratings.csv\"))\n        with open(movies_output_path.path,\
+          \ \"wb\") as f:\n            f.write(z.read(f\"{dataset}/movies.csv\"))\n\
+          \n"
+        image: python:3.11
+pipelineInfo:
+  name: ch07-movielens-original-split
+root:
+  dag:
+    tasks:
+      csv-to-parquet:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-csv-to-parquet
+        dependentTasks:
+        - unzip-movielens
+        inputs:
+          artifacts:
+            inputFile:
+              taskOutputArtifact:
+                outputArtifactKey: ratings_output_path
+                producerTask: unzip-movielens
+        taskInfo:
+          name: csv-to-parquet
+      download-movielens:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-movielens
+        inputs:
+          parameters:
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: download-movielens
+      split-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-split-dataset
+        dependentTasks:
+        - csv-to-parquet
+        inputs:
+          artifacts:
+            input_parquet:
+              taskOutputArtifact:
+                outputArtifactKey: output_path
+                producerTask: csv-to-parquet
+          parameters:
+            random_state:
+              componentInputParameter: random_init
+        taskInfo:
+          name: split-dataset
+      unzip-movielens:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-unzip-movielens
+        dependentTasks:
+        - download-movielens
+        inputs:
+          artifacts:
+            input_path:
+              taskOutputArtifact:
+                outputArtifactKey: output_path_one
+                producerTask: download-movielens
+          parameters:
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: unzip-movielens
+  inputDefinitions:
+    parameters:
+      dataset:
+        defaultValue: ml-latest-small
+        isOptional: true
+        parameterType: STRING
+      random_init:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

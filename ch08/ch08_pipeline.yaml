@@ -1,0 +1,495 @@
+# PIPELINE DEFINITION
+# Name: ch08-yolo-train-validate
+# Description: Chapter 8 YOLO train/validate on a synthetic ID-card dataset (CPU, arm64)
+# Inputs:
+#    batch: int [Default: 8.0]
+#    dataset_bucket: str [Default: 'ch08-datasets']
+#    epochs: int [Default: 5.0]
+#    imgsz: int [Default: 320.0]
+#    random_state: int [Default: 42.0]
+#    yolo_model_name: str [Default: 'yolov8n_custom']
+components:
+  comp-download-dataset:
+    executorLabel: exec-download-dataset
+    inputDefinitions:
+      parameters:
+        bucket:
+          defaultValue: ch08-datasets
+          isOptional: true
+          parameterType: STRING
+        key:
+          defaultValue: DATASET.tar.gz
+          isOptional: true
+          parameterType: STRING
+        output_dir:
+          defaultValue: DATASET
+          isOptional: true
+          parameterType: STRING
+        s3_endpoint:
+          defaultValue: http://minio-service.kubeflow.svc.cluster.local:9000
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-split-dataset:
+    executorLabel: exec-split-dataset
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        random_state:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch:
+          parameterType: NUMBER_INTEGER
+        epochs:
+          parameterType: NUMBER_INTEGER
+        imgsz:
+          defaultValue: 640.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        yolo_model_name:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        data_yaml:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        model_output:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-validate-model:
+    executorLabel: exec-validate-model
+    inputDefinitions:
+      artifacts:
+        data_yaml:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        imgsz:
+          defaultValue: 640.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-download-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'boto3' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_dataset(output_dataset: Output[Dataset], output_dir:\
+          \ str = \"DATASET\",\n                     s3_endpoint: str = \"http://minio-service.kubeflow.svc.cluster.local:9000\"\
+          ,\n                     bucket: str = \"ch08-datasets\", key: str = \"DATASET.tar.gz\"\
+          ):\n    # [ch08 fix] The author's Manning box URL now returns 404.\n   \
+          \ # Read the same tar.gz layout (MINIDATA/images, MINIDATA/labels) from\
+          \ S3 instead.\n    import os\n    import tarfile\n    import boto3\n\n \
+          \   downloaded_file = \"DATASET.gz\"\n    s3 = boto3.client(\"s3\", endpoint_url=s3_endpoint,\n\
+          \                      aws_access_key_id=\"minio\", aws_secret_access_key=\"\
+          minio123\")\n    s3.download_file(bucket, key, downloaded_file)\n    print(f\"\
+          downloaded s3://{bucket}/{key} ({os.path.getsize(downloaded_file)} bytes)\"\
+          )\n\n    # Extract to the output directory\n    extraction_path = os.path.join(output_dataset.path,\
+          \ output_dir)\n    os.makedirs(extraction_path, exist_ok=True)\n\n    with\
+          \ tarfile.open(downloaded_file, 'r:gz') as tar:\n        tar.extractall(extraction_path,\
+          \ filter=\"data\")\n\n"
+        image: python:3.11
+    exec-split-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - split_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef split_dataset(\n        random_state: int,\n        input_dataset:\
+          \ Input[Dataset],\n        train_dataset: Output[Dataset],\n        validation_dataset:\
+          \ Output[Dataset],\n        test_dataset: Output[Dataset]\n):\n    import\
+          \ os\n    import glob\n    import random\n    import shutil\n\n    BASE_PATH\
+          \ = \"MINIDATA\"\n\n    raw_images = list(glob.glob(os.path.join(input_dataset.path,\
+          \ \"DATASET\", BASE_PATH, \"images\", \"**\")))\n    raw_labels = list(glob.glob(os.path.join(input_dataset.path,\
+          \ \"DATASET\", BASE_PATH, \"labels\", \"**\")))\n\n    # [ch08 fix] The\
+          \ author zips two independently globbed lists. glob order is not\n    #\
+          \ guaranteed, so image i and label i may belong to different samples.\n\
+          \    stem = lambda p: os.path.splitext(os.path.basename(p))[0]\n    mismatched\
+          \ = sum(stem(a) != stem(b) for a, b in zip(raw_images, raw_labels))\n  \
+          \  print(f\"author-style zip(glob, glob): {mismatched}/{len(raw_images)}\
+          \ pairs have different stems\")\n    label_by_stem = {stem(p): p for p in\
+          \ raw_labels}\n    images = sorted(p for p in raw_images if stem(p) in label_by_stem)\n\
+          \    labels = [label_by_stem[stem(p)] for p in images]\n    print(f\"paired\
+          \ by stem: {len(images)} samples, images without label: {len(raw_images)\
+          \ - len(images)}\")\n\n    train_ratio = 0.75\n    validation_ratio = 0.15\n\
+          \n    # [ch08 fix] The author splits frames at random, so frames of one\
+          \ clip land in\n    # train and validation. Split whole clips instead (each\
+          \ negNN image is its own group).\n    clip = lambda p: stem(p).split(\"\
+          _\")[0]\n    clips = sorted({clip(p) for p in images})\n    random.Random(random_state).shuffle(clips)\n\
+          \    n_train = round(len(clips) * train_ratio)\n    n_val = round(len(clips)\
+          \ * validation_ratio)\n    split_of = {c: 0 for c in clips[:n_train]}\n\
+          \    split_of.update({c: 1 for c in clips[n_train:n_train + n_val]})\n \
+          \   split_of.update({c: 2 for c in clips[n_train + n_val:]})\n    parts\
+          \ = [[], [], []]\n    for x, y in zip(images, labels):\n        parts[split_of[clip(x)]].append((x,\
+          \ y))\n\n    # Create output directories for each split\n    for dataset_output,\
+          \ pairs in zip([train_dataset, validation_dataset, test_dataset], parts):\n\
+          \        os.makedirs(os.path.join(dataset_output.path, \"images\"), exist_ok=True)\n\
+          \        os.makedirs(os.path.join(dataset_output.path, \"labels\"), exist_ok=True)\n\
+          \        for x, y in pairs:\n            shutil.copy2(x, os.path.join(dataset_output.path,\
+          \ \"images\", os.path.basename(x)))\n            shutil.copy2(y, os.path.join(dataset_output.path,\
+          \ \"labels\", os.path.basename(y)))\n\n    # [ch08 check] adjacent-frame\
+          \ leakage: frames of one clip landing in several splits\n    train_clips,\
+          \ val_clips, test_clips = ({clip(x) for x, _ in p} for p in parts)\n   \
+          \ print(f\"split sizes train={len(parts[0])} val={len(parts[1])} test={len(parts[2])}\"\
+          )\n    print(f\"val clips also in train: {len(val_clips & train_clips)}/{len(val_clips)}\"\
+          )\n    print(f\"test clips also in train: {len(test_clips & train_clips)}/{len(test_clips)}\"\
+          )\n    print(f\"val clips: {sorted(val_clips)}\")\n    print(f\"test clips:\
+          \ {sorted(test_clips)}\")\n\n"
+        image: python:3.11
+    exec-train-model:
+      container:
+        args:
+        - "\n            # [mac] ultralytics, torch and libGL are already in the image:\
+          \ no apt-get / pip install\n\n            # Write training script\n    \
+          \        cat << 'EOF' > /tmp/train.py\n\nimport os\nimport yaml\nimport\
+          \ shutil\nimport argparse\nfrom ultralytics import YOLO\n\ndef parse_args():\n\
+          \    parser = argparse.ArgumentParser(description='Train YOLO model')\n\
+          \    parser.add_argument('--train-path', required=True, help='Path to training\
+          \ dataset')\n    parser.add_argument('--val-path', required=True, help='Path\
+          \ to validation dataset')\n    parser.add_argument('--test-path', required=True,\
+          \ help='Path to test dataset')\n    parser.add_argument('--epochs', type=int,\
+          \ required=True, help='Number of epochs')\n    parser.add_argument('--batch',\
+          \ type=int, required=True, help='Batch size')\n    parser.add_argument('--model-name',\
+          \ required=True, help='Name of the model')\n    parser.add_argument('--model-output',\
+          \ required=True, help='Path to save the model')\n    parser.add_argument('--data-yaml',\
+          \ required=True, help='Path to save data.yaml')\n    parser.add_argument('--imgsz',\
+          \ type=int, default=640, help='[ch08] image size (CPU lab uses 320)')\n\
+          \    return parser.parse_args()\n\ndef main():\n    args = parse_args()\n\
+          \n    # Define data configuration using absolute paths\n    data = {\n \
+          \       'train': os.path.join(args.train_path, \"images\"),\n        'val':\
+          \ os.path.join(args.val_path, \"images\"),\n        'test': os.path.join(args.test_path,\
+          \ \"images\"),\n        'nc': 1,\n        'names': {\n            0: 'id_card'\n\
+          \        }\n    }\n\n    # Write data.yaml\n    data_yaml_path = os.path.join(args.data_yaml,\
+          \ \"data.yaml\")\n    os.makedirs(os.path.dirname(data_yaml_path), exist_ok=True)\n\
+          \n    print(f\"Writing data configuration to {data_yaml_path}\")\n    print(\"\
+          Data YAML contents:\")\n    print(yaml.dump(data))\n\n    with open(data_yaml_path,\
+          \ 'w') as file:\n        yaml.dump(data, file)\n\n    # Train model\n  \
+          \  model = YOLO('yolov8n.pt')\n    results = model.train(\n        data=data_yaml_path,\n\
+          \        imgsz=args.imgsz,\n        epochs=args.epochs,\n        batch=args.batch,\n\
+          \        workers=0,\n        project=os.path.dirname(args.model_output),\n\
+          \        name=args.model_name\n    )\n\n    # Save best model\n    best_model_source\
+          \ = os.path.join(os.path.dirname(args.model_output), args.model_name, \"\
+          weights\", \"best.pt\")\n    best_model_dest = os.path.join(args.model_output,\
+          \ \"best.pt\")\n    os.makedirs(os.path.dirname(best_model_dest), exist_ok=True)\n\
+          \    shutil.copy2(best_model_source, best_model_dest)\n\n    # [ch08 fix]\
+          \ project=dirname(model_output) is outside the artifact folder, so plots,\n\
+          \    # results.csv and last.pt were never uploaded. Keep the run folder\
+          \ inside the Model artifact.\n    shutil.copytree(os.path.join(os.path.dirname(args.model_output),\
+          \ args.model_name),\n                    os.path.join(args.model_output,\
+          \ \"train_run\"), dirs_exist_ok=True)\n    print(\"model artifact contents:\"\
+          , sorted(os.listdir(args.model_output)))\n\nif __name__ == \"__main__\"\
+          :\n    main()\n\nEOF\n\n            # Execute the training script\n    \
+          \        python3 /tmp/train.py                 --train-path \"$0\"     \
+          \            --val-path \"$1\"                 --test-path \"$2\"      \
+          \           --epochs \"$3\"                 --batch \"$4\"             \
+          \    --model-name \"$5\"                 --model-output \"$6\"         \
+          \        --data-yaml \"$7\"                 --imgsz \"$8\"\n            "
+        - '{{$.inputs.artifacts[''train_dataset''].path}}'
+        - '{{$.inputs.artifacts[''validation_dataset''].path}}'
+        - '{{$.inputs.artifacts[''test_dataset''].path}}'
+        - '{{$.inputs.parameters[''epochs'']}}'
+        - '{{$.inputs.parameters[''batch'']}}'
+        - '{{$.inputs.parameters[''yolo_model_name'']}}'
+        - '{{$.outputs.artifacts[''model_output''].path}}'
+        - '{{$.outputs.artifacts[''data_yaml''].path}}'
+        - '{{$.inputs.parameters[''imgsz'']}}'
+        command:
+        - bash
+        - -c
+        image: ultralytics/ultralytics:8.3.40-arm64
+        resources:
+          cpuLimit: 4.0
+          cpuRequest: 1.0
+          memoryLimit: 3.0
+          memoryRequest: 1.0
+          resourceCpuLimit: '4'
+          resourceCpuRequest: '1'
+          resourceMemoryLimit: 3G
+          resourceMemoryRequest: 1G
+    exec-validate-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate_model(\n        data_yaml: Input[Artifact],\n      \
+          \  model: Input[Model],\n        validation_dataset: Input[Dataset],\n \
+          \       test_dataset: Input[Dataset],\n        metrics: Output[Metrics],\n\
+          \        imgsz: int = 640\n):\n    from ultralytics import YOLO\n    import\
+          \ os\n\n    # Print paths for debugging\n    print(f\"Data YAML path: {data_yaml.path}\"\
+          )\n    print(f\"Model path: {model.path}\")\n    print(f\"Validation dataset\
+          \ path: {validation_dataset.path}\")\n    print(f\"Test dataset path: {test_dataset.path}\"\
+          )\n\n    # Load the trained model\n    model_path = os.path.join(model.path,\
+          \ \"best.pt\")\n    print(f\"Loading model from: {model_path}\")\n    model\
+          \ = YOLO(model_path)\n\n    # Run validation using the existing data.yaml\n\
+          \    validation_results = model.val(\n        data=os.path.join(data_yaml.path,\
+          \ \"data.yaml\"),\n        imgsz=imgsz,\n        batch=1,\n        verbose=True\n\
+          \    )\n\n    # Log metrics\n    metrics.log_metric(\"map50-95\", validation_results.box.map)\n\
+          \    metrics.log_metric(\"map50\", validation_results.box.map50)\n    metrics.log_metric(\"\
+          map75\", validation_results.box.map75)\n\n    # [ch08 fix] best.pt was chosen\
+          \ on the validation set, so its score is not independent.\n    # Also score\
+          \ the test split, which training never looked at.\n    test_results = model.val(\n\
+          \        data=os.path.join(data_yaml.path, \"data.yaml\"),\n        split=\"\
+          test\",\n        imgsz=imgsz,\n        batch=1,\n        verbose=True\n\
+          \    )\n    metrics.log_metric(\"test_map50-95\", test_results.box.map)\n\
+          \    metrics.log_metric(\"test_map50\", test_results.box.map50)\n\n"
+        image: ultralytics/ultralytics:8.3.40-arm64
+        resources:
+          cpuLimit: 2.0
+          cpuRequest: 1.0
+          memoryLimit: 2.0
+          memoryRequest: 1.0
+          resourceCpuLimit: '2'
+          resourceCpuRequest: '1'
+          resourceMemoryLimit: 2G
+          resourceMemoryRequest: 1G
+pipelineInfo:
+  description: Chapter 8 YOLO train/validate on a synthetic ID-card dataset (CPU,
+    arm64)
+  name: ch08-yolo-train-validate
+root:
+  dag:
+    tasks:
+      download-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-dataset
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: dataset_bucket
+        taskInfo:
+          name: download-dataset
+      split-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-split-dataset
+        dependentTasks:
+        - download-dataset
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: download-dataset
+          parameters:
+            random_state:
+              componentInputParameter: random_state
+        taskInfo:
+          name: split-dataset
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - split-dataset
+        inputs:
+          artifacts:
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: split-dataset
+            train_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: train_dataset
+                producerTask: split-dataset
+            validation_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: validation_dataset
+                producerTask: split-dataset
+          parameters:
+            batch:
+              componentInputParameter: batch
+            epochs:
+              componentInputParameter: epochs
+            imgsz:
+              componentInputParameter: imgsz
+            yolo_model_name:
+              componentInputParameter: yolo_model_name
+        taskInfo:
+          name: train-model
+      validate-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate-model
+        dependentTasks:
+        - split-dataset
+        - train-model
+        inputs:
+          artifacts:
+            data_yaml:
+              taskOutputArtifact:
+                outputArtifactKey: data_yaml
+                producerTask: train-model
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model_output
+                producerTask: train-model
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: split-dataset
+            validation_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: validation_dataset
+                producerTask: split-dataset
+          parameters:
+            imgsz:
+              componentInputParameter: imgsz
+        taskInfo:
+          name: validate-model
+  inputDefinitions:
+    parameters:
+      batch:
+        defaultValue: 8.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      dataset_bucket:
+        defaultValue: ch08-datasets
+        isOptional: true
+        parameterType: STRING
+      epochs:
+        defaultValue: 5.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      imgsz:
+        defaultValue: 320.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      random_state:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      yolo_model_name:
+        defaultValue: yolov8n_custom
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

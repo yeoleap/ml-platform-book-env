@@ -1,0 +1,630 @@
+# PIPELINE DEFINITION
+# Name: ch07-movielens-prep
+# Inputs:
+#    dataset: str [Default: 'ml-latest-small']
+#    min_total_rows: int [Default: 100000.0]
+#    minio_bucket: str [Default: 'datasets']
+#    random_init: int [Default: 42.0]
+components:
+  comp-csv-to-parquet:
+    executorLabel: exec-csv-to-parquet
+    inputDefinitions:
+      artifacts:
+        inputFile:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-csv-to-parquet-2:
+    executorLabel: exec-csv-to-parquet-2
+    inputDefinitions:
+      artifacts:
+        inputFile:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-download-movielens:
+    executorLabel: exec-download-movielens
+    inputDefinitions:
+      parameters:
+        dataset:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_path_one:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-put-to-s3:
+    executorLabel: exec-put-to-s3
+    inputDefinitions:
+      artifacts:
+        inputFile:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        bucket:
+          defaultValue: datasets
+          isOptional: true
+          parameterType: STRING
+        prefix:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+        upload_file_name:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+  comp-put-to-s3-2:
+    executorLabel: exec-put-to-s3-2
+    inputDefinitions:
+      artifacts:
+        inputFile:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        bucket:
+          defaultValue: datasets
+          isOptional: true
+          parameterType: STRING
+        prefix:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+        upload_file_name:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+  comp-qa-movielens:
+    executorLabel: exec-qa-movielens
+    inputDefinitions:
+      parameters:
+        bucket:
+          defaultValue: datasets
+          isOptional: true
+          parameterType: STRING
+        dataset:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+        min_total_rows:
+          defaultValue: 100000.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+  comp-split-ratings:
+    executorLabel: exec-split-ratings
+    inputDefinitions:
+      artifacts:
+        input_parquet:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        dataset_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-unzip-movielens:
+    executorLabel: exec-unzip-movielens
+    inputDefinitions:
+      artifacts:
+        input_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        dataset:
+          defaultValue: ml-latest-small
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        movies_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        ratings_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-csv-to-parquet:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - csv_to_parquet
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'fastparquet' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef csv_to_parquet(inputFile: Input[Artifact], output_path: Output[Artifact]):\n\
+          \    import pandas as pd\n    df = pd.read_csv(inputFile.path, index_col=False)\n\
+          \    df.to_parquet(output_path.path, compression='gzip') \n\n"
+        image: python:3.11
+    exec-csv-to-parquet-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - csv_to_parquet
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'fastparquet' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef csv_to_parquet(inputFile: Input[Artifact], output_path: Output[Artifact]):\n\
+          \    import pandas as pd\n    df = pd.read_csv(inputFile.path, index_col=False)\n\
+          \    df.to_parquet(output_path.path, compression='gzip') \n\n"
+        image: python:3.11
+    exec-download-movielens:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_movielens
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'requests' &&\
+          \ \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_movielens(output_path_one: Output[Artifact], dataset:\
+          \ str = \"ml-latest-small\"):\n    \"\"\"Author's download with the dataset\
+          \ name as a parameter and TLS verification on.\"\"\"\n    import hashlib\n\
+          \n    import requests\n\n    url = f\"https://files.grouplens.org/datasets/movielens/{dataset}.zip\"\
+          \n    response = requests.get(url, stream=True, timeout=60)\n    response.raise_for_status()\n\
+          \    digest = hashlib.sha256()\n    with open(output_path_one.path, \"wb\"\
+          ) as file:\n        for chunk in response.iter_content(chunk_size=1024 *\
+          \ 1024):\n            if chunk:\n                file.write(chunk)\n   \
+          \             digest.update(chunk)\n    output_path_one.metadata[\"source_url\"\
+          ] = url\n    output_path_one.metadata[\"sha256\"] = digest.hexdigest()\n\
+          \    print(url, digest.hexdigest())\n\n"
+        image: python:3.11
+    exec-put-to-s3:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - put_to_s3
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'boto3' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef put_to_s3(inputFile: Input[Artifact], upload_file_name: str =\
+          \ \"\", bucket: str = \"datasets\",\n              prefix: str = \"ml-latest-small\"\
+          ):\n    \"\"\"Author's put_to_minio with a prefix parameter and an idempotent\
+          \ bucket check.\"\"\"\n    import os\n\n    import boto3\n    from botocore.exceptions\
+          \ import ClientError\n\n    s3 = boto3.client(\"s3\", endpoint_url=\"http://minio-service.kubeflow:9000\"\
+          ,\n                      aws_access_key_id=\"minio\", aws_secret_access_key=\"\
+          minio123\")\n    try:\n        s3.head_bucket(Bucket=bucket)\n    except\
+          \ ClientError:\n        s3.create_bucket(Bucket=bucket)\n    if os.path.isdir(inputFile.path):\n\
+          \        files = [(os.path.join(inputFile.path, f), f) for f in sorted(os.listdir(inputFile.path))]\n\
+          \    else:\n        files = [(inputFile.path, upload_file_name or os.path.basename(inputFile.path))]\n\
+          \    for local, name in files:\n        s3.upload_file(local, bucket, f\"\
+          {prefix}/{name}\")\n        print(f\"uploaded s3://{bucket}/{prefix}/{name}\
+          \ ({os.path.getsize(local)} bytes)\")\n\n"
+        image: python:3.11
+    exec-put-to-s3-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - put_to_s3
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'boto3' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef put_to_s3(inputFile: Input[Artifact], upload_file_name: str =\
+          \ \"\", bucket: str = \"datasets\",\n              prefix: str = \"ml-latest-small\"\
+          ):\n    \"\"\"Author's put_to_minio with a prefix parameter and an idempotent\
+          \ bucket check.\"\"\"\n    import os\n\n    import boto3\n    from botocore.exceptions\
+          \ import ClientError\n\n    s3 = boto3.client(\"s3\", endpoint_url=\"http://minio-service.kubeflow:9000\"\
+          ,\n                      aws_access_key_id=\"minio\", aws_secret_access_key=\"\
+          minio123\")\n    try:\n        s3.head_bucket(Bucket=bucket)\n    except\
+          \ ClientError:\n        s3.create_bucket(Bucket=bucket)\n    if os.path.isdir(inputFile.path):\n\
+          \        files = [(os.path.join(inputFile.path, f), f) for f in sorted(os.listdir(inputFile.path))]\n\
+          \    else:\n        files = [(inputFile.path, upload_file_name or os.path.basename(inputFile.path))]\n\
+          \    for local, name in files:\n        s3.upload_file(local, bucket, f\"\
+          {prefix}/{name}\")\n        print(f\"uploaded s3://{bucket}/{prefix}/{name}\
+          \ ({os.path.getsize(local)} bytes)\")\n\n"
+        image: python:3.11
+    exec-qa-movielens:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - qa_movielens
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pyarrow' 'pandas'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef qa_movielens(report: Output[Metrics], bucket: str = \"datasets\"\
+          , dataset: str = \"ml-latest-small\",\n                 min_total_rows:\
+          \ int = 100000):\n    \"\"\"Checks all splits and movies, not only the train\
+          \ column count.\"\"\"\n    import pandas as pd\n    from pyarrow import\
+          \ fs, parquet\n\n    s3 = fs.S3FileSystem(endpoint_override=\"http://minio-service.kubeflow:9000\"\
+          ,\n                         access_key=\"minio\", secret_key=\"minio123\"\
+          , scheme=\"http\")\n\n    def read(name):\n        with s3.open_input_file(f\"\
+          {bucket}/{dataset}/{name}.parquet.gzip\") as f:\n            return parquet.read_table(f).to_pandas()\n\
+          \n    errors = []\n    splits = {name: read(name) for name in [\"train\"\
+          , \"val\", \"test\"]}\n    movies = read(\"movies\")\n    total = sum(len(df)\
+          \ for df in splits.values())\n    expected = [\"userId\", \"movieId\", \"\
+          rating\", \"timestamp\"]\n    for name, df in splits.items():\n        if\
+          \ list(df.columns) != expected:\n            errors.append(f\"{name} columns\
+          \ {list(df.columns)}\")\n            continue\n        nulls = int(df[expected].isna().sum().sum())\n\
+          \        out_of_range = int((~df.rating.between(0.5, 5.0)).sum())\n    \
+          \    print(f\"{name}: rows={len(df)} share={len(df) / total:.3f} nulls={nulls}\
+          \ rating_out_of_range={out_of_range}\")\n        report.log_metric(f\"{name}_rows\"\
+          , len(df))\n        if nulls or out_of_range:\n            errors.append(f\"\
+          {name} nulls={nulls} out_of_range={out_of_range}\")\n    keys = {n: set(zip(df.userId,\
+          \ df.movieId)) for n, df in splits.items()}\n    overlap = len(keys[\"train\"\
+          ] & keys[\"val\"]) + len(keys[\"train\"] & keys[\"test\"]) + len(keys[\"\
+          val\"] & keys[\"test\"])\n    all_ratings = pd.concat(splits.values())\n\
+          \    unknown_movies = int((~all_ratings.movieId.isin(movies.movieId)).sum())\n\
+          \    print(f\"total={total} duplicate_keys_across_splits={overlap} ratings_with_unknown_movie={unknown_movies}\"\
+          )\n    print(\"timestamp range:\", pd.to_datetime(all_ratings.timestamp.min(),\
+          \ unit=\"s\"),\n          pd.to_datetime(all_ratings.timestamp.max(), unit=\"\
+          s\"))\n    report.log_metric(\"total_rows\", total)\n    report.log_metric(\"\
+          duplicate_keys_across_splits\", overlap)\n    report.log_metric(\"unknown_movies\"\
+          , unknown_movies)\n    if total < min_total_rows:\n        errors.append(f\"\
+          total rows {total} < {min_total_rows}\")\n    if overlap or unknown_movies:\n\
+          \        errors.append(f\"overlap={overlap} unknown_movies={unknown_movies}\"\
+          )\n    if errors:\n        raise SystemExit(\"QA failed: \" + \"; \".join(errors))\n\
+          \    print(\"QA passed!\")\n\n"
+        image: python:3.11
+    exec-split-ratings:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - split_ratings
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'fastparquet' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef split_ratings(input_parquet: Input[Artifact], dataset_path: Output[Artifact],\
+          \ random_state: int = 42):\n    \"\"\"Author's split_dataset without the\
+          \ two user_id/item_id lines.\"\"\"\n    import os\n\n    import pandas as\
+          \ pd\n    from sklearn.model_selection import train_test_split\n\n    ratings_df\
+          \ = pd.read_parquet(input_parquet.path)\n    print(\"columns:\", list(ratings_df.columns),\
+          \ \"rows:\", len(ratings_df))\n    train, test = train_test_split(ratings_df,\
+          \ test_size=0.25, random_state=random_state)\n    val, test = train_test_split(test,\
+          \ test_size=0.10 / 0.25, random_state=random_state)\n    os.mkdir(dataset_path.path)\n\
+          \    for name, df in [(\"train\", train), (\"val\", val), (\"test\", test)]:\n\
+          \        df.to_parquet(os.path.join(dataset_path.path, f\"{name}.parquet.gzip\"\
+          ), compression=\"gzip\")\n        print(name, df.shape)\n\n"
+        image: python:3.11
+    exec-unzip-movielens:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - unzip_movielens
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef unzip_movielens(input_path: Input[Artifact], ratings_output_path:\
+          \ Output[Artifact],\n                    movies_output_path: Output[Artifact],\
+          \ dataset: str = \"ml-latest-small\"):\n    import zipfile\n\n    with zipfile.ZipFile(input_path.path,\
+          \ \"r\") as z:\n        with open(ratings_output_path.path, \"wb\") as f:\n\
+          \            f.write(z.read(f\"{dataset}/ratings.csv\"))\n        with open(movies_output_path.path,\
+          \ \"wb\") as f:\n            f.write(z.read(f\"{dataset}/movies.csv\"))\n\
+          \n"
+        image: python:3.11
+pipelineInfo:
+  name: ch07-movielens-prep
+root:
+  dag:
+    tasks:
+      csv-to-parquet:
+        cachingOptions: {}
+        componentRef:
+          name: comp-csv-to-parquet
+        dependentTasks:
+        - unzip-movielens
+        inputs:
+          artifacts:
+            inputFile:
+              taskOutputArtifact:
+                outputArtifactKey: ratings_output_path
+                producerTask: unzip-movielens
+        taskInfo:
+          name: csv-to-parquet
+      csv-to-parquet-2:
+        cachingOptions: {}
+        componentRef:
+          name: comp-csv-to-parquet-2
+        dependentTasks:
+        - unzip-movielens
+        inputs:
+          artifacts:
+            inputFile:
+              taskOutputArtifact:
+                outputArtifactKey: movies_output_path
+                producerTask: unzip-movielens
+        taskInfo:
+          name: csv-to-parquet-2
+      download-movielens:
+        cachingOptions: {}
+        componentRef:
+          name: comp-download-movielens
+        inputs:
+          parameters:
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: download-movielens
+      put-to-s3:
+        cachingOptions: {}
+        componentRef:
+          name: comp-put-to-s3
+        dependentTasks:
+        - csv-to-parquet-2
+        inputs:
+          artifacts:
+            inputFile:
+              taskOutputArtifact:
+                outputArtifactKey: output_path
+                producerTask: csv-to-parquet-2
+          parameters:
+            bucket:
+              componentInputParameter: minio_bucket
+            prefix:
+              componentInputParameter: dataset
+            upload_file_name:
+              runtimeValue:
+                constant: movies.parquet.gzip
+        taskInfo:
+          name: put-to-s3
+      put-to-s3-2:
+        cachingOptions: {}
+        componentRef:
+          name: comp-put-to-s3-2
+        dependentTasks:
+        - split-ratings
+        inputs:
+          artifacts:
+            inputFile:
+              taskOutputArtifact:
+                outputArtifactKey: dataset_path
+                producerTask: split-ratings
+          parameters:
+            bucket:
+              componentInputParameter: minio_bucket
+            prefix:
+              componentInputParameter: dataset
+        taskInfo:
+          name: put-to-s3-2
+      qa-movielens:
+        cachingOptions: {}
+        componentRef:
+          name: comp-qa-movielens
+        dependentTasks:
+        - put-to-s3
+        - put-to-s3-2
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: minio_bucket
+            dataset:
+              componentInputParameter: dataset
+            min_total_rows:
+              componentInputParameter: min_total_rows
+        taskInfo:
+          name: qa-movielens
+      split-ratings:
+        cachingOptions: {}
+        componentRef:
+          name: comp-split-ratings
+        dependentTasks:
+        - csv-to-parquet
+        inputs:
+          artifacts:
+            input_parquet:
+              taskOutputArtifact:
+                outputArtifactKey: output_path
+                producerTask: csv-to-parquet
+          parameters:
+            random_state:
+              componentInputParameter: random_init
+        taskInfo:
+          name: split-ratings
+      unzip-movielens:
+        cachingOptions: {}
+        componentRef:
+          name: comp-unzip-movielens
+        dependentTasks:
+        - download-movielens
+        inputs:
+          artifacts:
+            input_path:
+              taskOutputArtifact:
+                outputArtifactKey: output_path_one
+                producerTask: download-movielens
+          parameters:
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: unzip-movielens
+  inputDefinitions:
+    parameters:
+      dataset:
+        defaultValue: ml-latest-small
+        isOptional: true
+        parameterType: STRING
+      min_total_rows:
+        defaultValue: 100000.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      minio_bucket:
+        defaultValue: datasets
+        isOptional: true
+        parameterType: STRING
+      random_init:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

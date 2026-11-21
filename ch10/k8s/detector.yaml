@@ -1,0 +1,51 @@
+# ch10: the yolo_v8:ch10 Bento image (built on this Mac, arm64) as a Deployment + Service on kind.
+# Load the image first: kind load image-archive (see ch10 notes); there is no registry to pull from.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ch10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: id-card-detector
+  namespace: ch10
+  labels: {app: id-card-detector, model: ch08-id-card-detector-v1}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: id-card-detector}
+  template:
+    metadata:
+      labels: {app: id-card-detector, model: ch08-id-card-detector-v1}
+    spec:
+      containers:
+        - name: bento
+          image: yolo_v8:ch10
+          imagePullPolicy: Never   # use the image loaded into the node, never try a registry
+          # entrypoint turns leading flags into: bentoml serve <flags> $BENTO_PATH
+          # default api workers = node CPU count (8), each importing torch; one is enough here
+          args: ["--api-workers", "1"]
+          ports:
+            - {name: http, containerPort: 3000}
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "2", memory: "1536Mi"}
+          readinessProbe:      # BentoML's own endpoint: ready once the runner has loaded the model
+            httpGet: {path: /readyz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: id-card-detector
+  namespace: ch10
+spec:
+  selector: {app: id-card-detector}
+  ports:
+    - {name: http, port: 80, targetPort: http}

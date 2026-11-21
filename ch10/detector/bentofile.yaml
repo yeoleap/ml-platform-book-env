@@ -1,0 +1,22 @@
+service: "service.py:svc"
+labels:
+  owner: ch10
+  model: ch08-id-card-detector/1
+include:
+  - "service.py"
+  - "yolov8_custom.pt"
+  - "model_info.json"
+python:
+  packages:
+    - ultralytics==8.3.40
+    - torch==2.5.1
+    - torchvision==0.20.1
+    - numpy==1.26.4
+    - opencv-python-headless<4.12
+  # The default lock step resolves every wheel up front (torch alone is hundreds of MB).
+  lock_packages: false
+docker:
+  python_version: "3.10"
+  system_packages:
+    - libgl1
+    - libglib2.0-0
